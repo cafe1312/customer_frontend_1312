@@ -1,7 +1,8 @@
-import React from 'react';
+import React, { useContext } from 'react';
 import { Link } from 'react-router-dom';
 import { Mail, Phone, MapPin } from 'lucide-react';
 import logoImg from '../assets/logo.png';
+import { SettingsContext } from '../context/SettingsContext';
 
 function InstagramIcon(props) {
   return (
@@ -44,6 +45,8 @@ function FacebookIcon(props) {
 }
 
 export default function Footer() {
+  const { settings } = useContext(SettingsContext);
+
   return (
     <footer className="bg-cafeDark text-background border-t border-primary/10">
       <div className="mx-auto max-w-7xl px-4 py-12 sm:px-6 lg:px-8">
@@ -52,17 +55,14 @@ export default function Footer() {
           <div className="md:col-span-2 space-y-4">
             <Link to="/" className="flex items-center gap-2.5 font-serif text-2xl font-bold tracking-tight">
               <img src={logoImg} alt="1312 Cafe Logo" className="h-9 w-9 rounded-full object-cover" />
-              <span>1312 <span className="text-primary">Cafe</span></span>
+              <span>{settings.cafeName}</span>
             </Link>
             <p className="text-background/60 text-sm max-w-sm">
               Artisanal roasts, crafted teas, and premium bites served in a tranquil modern oasis. Elevate your everyday coffee experience.
             </p>
             <div className="flex gap-4 pt-2">
-              <a href="https://instagram.com" target="_blank" rel="noreferrer" className="p-2 rounded-full bg-background/5 hover:bg-primary hover:text-cafeDark transition-all text-background/80">
+              <a href="https://www.instagram.com/cafe1312_?igsh=MTE5M2lwaHpmamVqcA==" target="_blank" rel="noreferrer" className="p-2 rounded-full bg-background/5 hover:bg-primary hover:text-cafeDark transition-all text-background/80" aria-label="Instagram">
                 <InstagramIcon className="h-4 w-4" />
-              </a>
-              <a href="https://facebook.com" target="_blank" rel="noreferrer" className="p-2 rounded-full bg-background/5 hover:bg-primary hover:text-cafeDark transition-all text-background/80">
-                <FacebookIcon className="h-4 w-4" />
               </a>
             </div>
           </div>
@@ -84,25 +84,25 @@ export default function Footer() {
             <ul className="space-y-3 text-sm text-background/70">
               <li className="flex items-center gap-2">
                 <Phone className="h-4 w-4 text-primary shrink-0" />
-                <span>+1 234 567 8900</span>
+                <span>{settings.phone}</span>
               </li>
               <li className="flex items-start gap-2">
                 <MapPin className="h-4 w-4 text-primary shrink-0 mt-0.5" />
-                <span>1312 Gourmet St, Culinary City</span>
+                <span>{settings.address}</span>
               </li>
               <li className="border-t border-background/10 pt-3 mt-3 text-xs text-background/50">
                 <p className="font-semibold text-background/80 mb-1">Hours:</p>
-                <p>Monday - Sunday: 8:00 AM - 10:00 PM</p>
+                <p>{settings.businessHours?.days || 'Monday - Sunday'}: {settings.businessHours?.open || '08:00'} - {settings.businessHours?.close || '22:00'}</p>
               </li>
             </ul>
           </div>
         </div>
 
         <div className="border-t border-background/10 mt-12 pt-6 flex flex-col md:flex-row items-center justify-between text-xs text-background/50 gap-4">
-          <p>© {new Date().getFullYear()} 1312 Cafe. All rights reserved.</p>
+          <p>© {new Date().getFullYear()} {settings.cafeName}. All rights reserved.</p>
           <div className="flex gap-4">
-            <a href="#privacy" className="hover:text-primary">Privacy Policy</a>
-            <a href="#terms" className="hover:text-primary">Terms of Service</a>
+            <Link to="/privacy" className="hover:text-primary">Privacy Policy</Link>
+            <Link to="/terms" className="hover:text-primary">Terms of Service</Link>
           </div>
         </div>
       </div>

@@ -1,24 +1,29 @@
-import React from 'react';
+import React, { useContext } from 'react';
 import { Link } from 'react-router-dom';
 import { Coffee, ShieldCheck, Heart, Sparkles, ArrowRight } from 'lucide-react';
+import { SettingsContext } from '../context/SettingsContext';
 
 export default function About() {
+  const { settings } = useContext(SettingsContext);
+
   return (
     <div className="space-y-16 pb-16">
       {/* Page Header */}
       <section className="bg-cafeDark py-20 text-background text-center relative overflow-hidden">
         <div className="absolute inset-0 opacity-10">
           <img
-            src="https://images.unsplash.com/photo-1442512595331-e89e73853f31?w=1000&auto=format&fit=crop"
+            src={settings.aboutHeroImage || "https://images.unsplash.com/photo-1442512595331-e89e73853f31?w=1000&auto=format&fit=crop"}
             alt="Coffee Roaster"
             className="w-full h-full object-cover"
           />
         </div>
         <div className="max-w-3xl mx-auto px-4 relative z-10 space-y-4">
           <span className="text-xs font-bold text-primary tracking-widest uppercase">Our Story</span>
-          <h1 className="font-serif text-4xl sm:text-5xl font-bold tracking-tight">Crafting Everyday Sanctuaries</h1>
+          <h1 className="font-serif text-4xl sm:text-5xl font-bold tracking-tight">
+            {settings.aboutHeroTitle || "Crafting Everyday Sanctuaries"}
+          </h1>
           <p className="text-sm sm:text-base text-background/60 font-light max-w-xl mx-auto">
-            1312 Cafe was founded with one simple vision: to blend the craft of artisanal coffee with a clean, tranquil, and modern aesthetic space.
+            {settings.cafeName} was founded with one simple vision: to blend the craft of artisanal coffee with a clean, tranquil, and modern aesthetic space.
           </p>
         </div>
       </section>
@@ -26,13 +31,17 @@ export default function About() {
       {/* Main Philosophy */}
       <section className="mx-auto max-w-5xl px-4 sm:px-6 lg:px-8 grid grid-cols-1 md:grid-cols-2 gap-12 items-center">
         <div className="space-y-6">
-          <h2 className="font-serif text-2xl sm:text-3xl font-bold text-cafeDark">The 1312 Philosophy</h2>
-          <p className="text-sm text-cafeDark/70 leading-relaxed">
-            We believe that coffee is more than just a morning caffeine routine. It is a moment of pause, a medium for conversation, and a craft that rewards patience and precision.
-          </p>
-          <p className="text-sm text-cafeDark/70 leading-relaxed">
-            Every bean we roast and brew is ethically sourced from single-origin cooperatives. Our baristas undergo rigorous training to master temperature, grind size, and extraction timing to bring out the perfect flavor profile in your cup.
-          </p>
+          <h2 className="font-serif text-2xl sm:text-3xl font-bold text-cafeDark">
+            {settings.aboutPhilosophyTitle || `The ${settings.cafeName} Philosophy`}
+          </h2>
+          <div className="text-sm text-cafeDark/70 leading-relaxed space-y-4 whitespace-pre-wrap">
+            {settings.aboutPhilosophyText || (
+              <>
+                <p>We believe that coffee is more than just a morning caffeine routine. It is a moment of pause, a medium for conversation, and a craft that rewards patience and precision.</p>
+                <p>Every bean we roast and brew is ethically sourced from single-origin cooperatives. Our baristas undergo rigorous training to master temperature, grind size, and extraction timing to bring out the perfect flavor profile in your cup.</p>
+              </>
+            )}
+          </div>
           <div className="grid grid-cols-2 gap-6 pt-4">
             <div className="flex gap-3">
               <ShieldCheck className="h-6 w-6 text-primary shrink-0" />
@@ -53,7 +62,7 @@ export default function About() {
 
         <div className="aspect-[4/3] rounded-3xl overflow-hidden shadow-md border border-primary/10">
           <img
-            src="https://images.unsplash.com/photo-1495474472287-4d71bcdd2085?w=600&auto=format&fit=crop"
+            src={settings.aboutMainImage || "https://images.unsplash.com/photo-1495474472287-4d71bcdd2085?w=600&auto=format&fit=crop"}
             alt="Barista pouring latte art"
             className="w-full h-full object-cover"
           />
@@ -65,7 +74,7 @@ export default function About() {
         <div className="mx-auto max-w-7xl px-4 sm:px-6 lg:px-8 text-center space-y-12">
           <div className="max-w-xl mx-auto space-y-2">
             <span className="text-xs font-bold text-primary tracking-widest uppercase">Our Values</span>
-            <h3 className="font-serif text-2xl sm:text-3xl font-bold text-cafeDark">What Drives 1312 Cafe</h3>
+            <h3 className="font-serif text-2xl sm:text-3xl font-bold text-cafeDark">What Drives {settings.cafeName}</h3>
           </div>
 
           <div className="grid grid-cols-1 md:grid-cols-3 gap-8">

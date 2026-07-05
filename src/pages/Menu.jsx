@@ -42,6 +42,7 @@ export default function Menu() {
   const [products, setProducts] = useState([]);
   const [loading, setLoading] = useState(true);
   const [searchQuery, setSearchQuery] = useState('');
+  const [dietaryPreference, setDietaryPreference] = useState('ALL'); // ALL, VEG, NONVEG
   
   const { cartCount, cartTotal } = useContext(CartContext);
   
@@ -51,8 +52,10 @@ export default function Menu() {
   useEffect(() => {
     async function loadMenu() {
       try {
-        const catRes = await api.get('/categories');
-        const prodRes = await api.get('/products');
+        const [catRes, prodRes] = await Promise.all([
+          api.get('/categories'),
+          api.get('/products')
+        ]);
         
         if (catRes.success && catRes.categories?.length) {
           setCategories(catRes.categories);
@@ -93,7 +96,12 @@ export default function Menu() {
       ? product.name.toLowerCase().includes(searchQuery.toLowerCase()) ||
         (product.description && product.description.toLowerCase().includes(searchQuery.toLowerCase()))
       : true;
-    return matchesCategory && matchesSearch;
+    const matchesDiet = dietaryPreference === 'ALL'
+      ? true
+      : dietaryPreference === 'VEG'
+      ? product.isVeg === true
+      : product.isVeg === false;
+    return matchesCategory && matchesSearch && matchesDiet;
   });
 
   if (loading) return <Spinner fullPage />;
@@ -136,19 +144,74 @@ export default function Menu() {
           >
             All Items
           </button>
-          {categories.map((category) => (
-            <button
-              key={category.id}
-              onClick={() => handleCategorySelect(category.id)}
-              className={`px-5 py-2.5 rounded-full text-xs font-semibold whitespace-nowrap transition-all border ${
-                String(activeCategoryId) === String(category.id)
-                  ? 'bg-primary text-cafeDark border-primary shadow-sm'
-                  : 'bg-background text-cafeDark/70 border-primary/10 hover:border-primary/30'
-              }`}
-            >
-              {category.name}
-            </button>
-          ))}
+          {categories.map((category) => {
+            const isAvailable = !category.availableFrom || !category.availableTo || (() => {
+              const now = new Date();
+              const currentVal = now.getHours() * 60 + now.getMinutes();
+              const parseMin = (t) => {
+                if (!t) return 0;
+                const p = t.split(':');
+                return p.length >= 2 ? parseInt(p[0]) * 60 + parseInt(p[1]) : 0;
+              };
+              const fromVal = parseMin(category.availableFrom);
+              const toVal = parseMin(category.availableTo);
+              return fromVal <= toVal 
+                ? (currentVal >= fromVal && currentVal <= toVal)
+                : (currentVal >= fromVal || currentVal <= toVal);
+            })();
+
+            return (
+              <button
+                key={category.id}
+                onClick={() => handleCategorySelect(category.id)}
+                className={`px-5 py-2.5 rounded-full text-xs font-semibold whitespace-nowrap transition-all border ${
+                  String(activeCategoryId) === String(category.id)
+                    ? 'bg-primary text-cafeDark border-primary shadow-sm'
+                    : isAvailable
+                    ? 'bg-background text-cafeDark/70 border-primary/10 hover:border-primary/30'
+                    : 'bg-cafeDark/5 text-cafeDark/35 border-primary/5 hover:border-primary/10'
+                }`}
+              >
+                {category.name} {!isAvailable && '(Closed)'}
+              </button>
+            );
+          })}
+        </div>
+
+        {/* Dietary preference filter buttons */}
+        <div className="flex gap-2.5 pb-2 border-b border-primary/5 animate-fade-in">
+          <button
+            onClick={() => setDietaryPreference('ALL')}
+            className={`px-4 py-2 rounded-2xl text-xs font-bold transition-all border ${
+              dietaryPreference === 'ALL'
+                ? 'bg-cafeDark text-background border-cafeDark shadow-sm'
+                : 'bg-background text-cafeDark/60 border-primary/10 hover:border-primary/20'
+            }`}
+          >
+            All Eats
+          </button>
+          <button
+            onClick={() => setDietaryPreference('VEG')}
+            className={`flex items-center gap-1.5 px-4 py-2 rounded-2xl text-xs font-bold transition-all border ${
+              dietaryPreference === 'VEG'
+                ? 'bg-green-600 text-white border-green-600 shadow-sm'
+                : 'bg-background text-green-600 border-green-200 hover:bg-green-50'
+            }`}
+          >
+            <span className="w-2.5 h-2.5 rounded-full bg-green-600 border border-white shrink-0"></span>
+            Veg Only
+          </button>
+          <button
+            onClick={() => setDietaryPreference('NONVEG')}
+            className={`flex items-center gap-1.5 px-4 py-2 rounded-2xl text-xs font-bold transition-all border ${
+              dietaryPreference === 'NONVEG'
+                ? 'bg-red-600 text-white border-red-600 shadow-sm'
+                : 'bg-background text-red-650 border-red-200 hover:bg-red-50'
+            }`}
+          >
+            <span className="w-2.5 h-2.5 rounded-full bg-red-600 border border-white shrink-0"></span>
+            Non-Veg Only
+          </button>
         </div>
 
         {/* Products Grid */}

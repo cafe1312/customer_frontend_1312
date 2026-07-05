@@ -13,31 +13,69 @@ const FALLBACK_CATEGORIES = [
 ];
 
 const FALLBACK_PRODUCTS = [
-  { id: 1, name: 'Cafe Latte', price: 3.80, description: 'Double shot of espresso with steamed silky milk.', image: 'https://images.unsplash.com/photo-1541167760496-1628856ab772?w=500&auto=format&fit=crop&q=60', available: true, category: { name: 'Coffee' } },
-  { id: 2, name: 'Matcha Latte', price: 4.20, description: 'Premium stone-ground green tea whisked with steamed milk.', image: 'https://images.unsplash.com/photo-1536256263959-770b48d82b0a?w=500&auto=format&fit=crop&q=60', available: true, category: { name: 'Tea' } },
-  { id: 3, name: '1312 Sig Burger', price: 8.90, description: 'Premium Angus beef patty, cheddar, secret sauce, caramelized onions.', image: 'https://images.unsplash.com/photo-1568901346375-23c9450c58cd?w=500&auto=format&fit=crop&q=60', available: true, category: { name: 'Burger' } },
-  { id: 4, name: 'Tiramisu Classic', price: 5.50, description: 'Ladyfingers soaked in coffee and rum, layered with whipped mascarpone.', image: 'https://images.unsplash.com/photo-1571877227200-a0d98ea607e9?w=500&auto=format&fit=crop&q=60', available: true, category: { name: 'Dessert' } },
+  { id: 1, name: 'Cafe Latte', price: 119.00, description: 'Double shot of espresso with steamed silky milk.', image: 'https://images.unsplash.com/photo-1541167760496-1628856ab772?w=500&auto=format&fit=crop&q=60', available: true, category: { name: 'Coffee' } },
+  { id: 2, name: 'Matcha Latte', price: 139.00, description: 'Premium stone-ground green tea whisked with steamed milk.', image: 'https://images.unsplash.com/photo-1536256263959-770b48d82b0a?w=500&auto=format&fit=crop&q=60', available: true, category: { name: 'Tea' } },
+  { id: 3, name: '1312 Sig Burger', price: 159.00, description: 'Premium patty, cheddar cheese, secret sauce, caramelized onions.', image: 'https://images.unsplash.com/photo-1568901346375-23c9450c58cd?w=500&auto=format&fit=crop&q=60', available: true, category: { name: 'Burger' } },
+  { id: 4, name: 'Tiramisu Classic', price: 149.00, description: 'Ladyfingers soaked in coffee, layered with whipped mascarpone.', image: 'https://images.unsplash.com/photo-1571877227200-a0d98ea607e9?w=500&auto=format&fit=crop&q=60', available: true, category: { name: 'Dessert' } },
 ];
+
+const DEFAULT_BG = 'https://images.unsplash.com/photo-1498804103079-a6351b050096?w=1200&auto=format&fit=crop&q=60';
 
 export default function Home() {
   const [categories, setCategories] = useState([]);
   const [featuredProducts, setFeaturedProducts] = useState([]);
+  const [heroBgs, setHeroBgs] = useState([DEFAULT_BG]);
+  const [currentBgIndex, setCurrentBgIndex] = useState(0);
   const [loading, setLoading] = useState(true);
+  const [settings, setSettings] = useState(null);
 
   useEffect(() => {
     async function fetchData() {
       try {
-        const catRes = await api.get('/categories');
-        const prodRes = await api.get('/products');
+        const [catRes, prodRes, settingsRes] = await Promise.all([
+          api.get('/categories'),
+          api.get('/products'),
+          api.get('/settings')
+        ]);
         
+        if (settingsRes.success && settingsRes.settings) {
+          setSettings(settingsRes.settings);
+        }
+
         if (catRes.success && catRes.categories?.length) {
-          setCategories(catRes.categories.slice(0, 4));
+          let popularCats = [];
+          if (settingsRes.success && settingsRes.settings?.popularCategoryIds?.length) {
+            const popIds = settingsRes.settings.popularCategoryIds.map(Number);
+            popularCats = popIds
+              .map(id => catRes.categories.find(c => Number(c.id) === id))
+              .filter(Boolean);
+          }
+          if (popularCats.length === 0) {
+            popularCats = catRes.categories.slice(0, 4);
+          }
+          setCategories(popularCats);
         } else {
           setCategories(FALLBACK_CATEGORIES);
         }
 
+        // Handle custom scrolling backgrounds
+        if (settingsRes.success && settingsRes.settings?.heroImages?.length) {
+          setHeroBgs(settingsRes.settings.heroImages);
+        } else {
+          setHeroBgs([DEFAULT_BG]);
+        }
+
+        // Handle signature products
+        let signatureProds = [];
         if (prodRes.success && prodRes.products?.length) {
-          setFeaturedProducts(prodRes.products.slice(0, 4));
+          if (settingsRes.success && settingsRes.settings?.signatureProductIds?.length) {
+            const sigIds = settingsRes.settings.signatureProductIds.map(Number);
+            signatureProds = prodRes.products.filter(p => sigIds.includes(Number(p.id)));
+          }
+          if (signatureProds.length === 0) {
+            signatureProds = prodRes.products.slice(0, 4);
+          }
+          setFeaturedProducts(signatureProds);
         } else {
           setFeaturedProducts(FALLBACK_PRODUCTS);
         }
@@ -45,6 +83,7 @@ export default function Home() {
         console.warn('API error, falling back to mock data:', err);
         setCategories(FALLBACK_CATEGORIES);
         setFeaturedProducts(FALLBACK_PRODUCTS);
+        setHeroBgs([DEFAULT_BG]);
       } finally {
         setLoading(false);
       }
@@ -52,28 +91,41 @@ export default function Home() {
     fetchData();
   }, []);
 
+  // Cycle slideshow background images every 5 seconds
+  useEffect(() => {
+    if (heroBgs.length <= 1) return;
+    const interval = setInterval(() => {
+      setCurrentBgIndex((prev) => (prev + 1) % heroBgs.length);
+    }, 5000);
+    return () => clearInterval(interval);
+  }, [heroBgs]);
+
   if (loading) return <Spinner fullPage />;
 
   return (
     <div className="space-y-16 pb-16">
       {/* Hero Section */}
-      <section className="relative overflow-hidden bg-cafeDark py-24 text-background">
-        <div className="absolute inset-0 opacity-20">
-          <img
-            src="https://images.unsplash.com/photo-1498804103079-a6351b050096?w=1200&auto=format&fit=crop&q=60"
-            alt="Cafe ambiance background"
-            className="h-full w-full object-cover"
-          />
+      <section className="relative overflow-hidden bg-cafeDark py-24 text-background min-h-[480px] flex items-center justify-center">
+        {/* Background slideshow scrolling 1 by 1 */}
+        <div className="absolute inset-0 z-0">
+          {heroBgs.map((bgUrl, idx) => (
+            <img
+              key={bgUrl + idx}
+              src={bgUrl}
+              alt="Cafe ambiance background"
+              className={`absolute inset-0 h-full w-full object-cover transition-opacity duration-1000 ease-in-out ${
+                idx === currentBgIndex ? 'opacity-25' : 'opacity-0'
+              }`}
+            />
+          ))}
         </div>
+        
         <div className="mx-auto max-w-7xl px-4 sm:px-6 lg:px-8 relative z-10 flex flex-col items-center text-center">
-          <span className="mb-4 inline-flex items-center gap-1.5 rounded-full bg-primary/20 border border-primary/30 px-3 py-1 text-xs font-semibold text-primary uppercase tracking-widest">
-            <Star className="h-3 w-3 fill-primary" /> Established 2026
-          </span>
           <h1 className="max-w-3xl font-serif text-4xl sm:text-6xl font-bold tracking-tight leading-none mb-6">
-            Where Craft Meets <span className="text-primary">Tranquility</span>
+            {settings?.homeHeroTitle || "Where Craft Meets Tranquility"}
           </h1>
           <p className="max-w-xl text-base sm:text-lg text-background/70 font-light mb-8">
-            Experience premium coffee brewing and fresh artisanal bites crafted with precision, served in our modern aesthetic sanctuary.
+            {settings?.homeHeroSubtitle || "Experience premium coffee brewing and fresh artisanal bites crafted with precision, served in our modern aesthetic sanctuary."}
           </p>
           <div className="flex flex-col sm:flex-row gap-4">
             <Link
@@ -94,7 +146,7 @@ export default function Home() {
       </section>
 
       {/* Explore Categories */}
-      <section className="mx-auto max-w-7xl px-4 sm:px-6 lg:px-8">
+      <section className="mx-auto max-w-7xl px-4 sm:px-6 lg:px-8 animate-fade-in">
         <div className="flex items-end justify-between mb-8">
           <div>
             <span className="text-xs font-bold text-primary tracking-widest uppercase">Browse menu</span>
@@ -127,7 +179,7 @@ export default function Home() {
       </section>
 
       {/* Featured Products */}
-      <section className="mx-auto max-w-7xl px-4 sm:px-6 lg:px-8">
+      <section className="mx-auto max-w-7xl px-4 sm:px-6 lg:px-8 animate-fade-in">
         <div className="mb-8 text-center">
           <span className="text-xs font-bold text-primary tracking-widest uppercase">Vibe selections</span>
           <h2 className="font-serif text-2xl sm:text-3xl font-bold mt-1 text-cafeDark">Signature Creations</h2>
@@ -141,12 +193,14 @@ export default function Home() {
       </section>
 
       {/* Quick About/Vibe Promo Banner */}
-      <section className="mx-auto max-w-7xl px-4 sm:px-6 lg:px-8">
+      <section className="mx-auto max-w-7xl px-4 sm:px-6 lg:px-8 animate-fade-in">
         <div className="rounded-3xl overflow-hidden bg-primary/10 border border-primary/20 p-8 sm:p-12 flex flex-col md:flex-row items-center justify-between gap-8">
           <div className="space-y-4 max-w-lg">
-            <h3 className="font-serif text-2xl sm:text-3xl font-bold text-cafeDark">Join the 1312 Community</h3>
+            <h3 className="font-serif text-2xl sm:text-3xl font-bold text-cafeDark">
+              {settings?.homeCommunityTitle || "Join the 1312 Community"}
+            </h3>
             <p className="text-sm text-cafeDark/70 leading-relaxed">
-              We brew artisanal coffee and curate fresh culinary snacks with one simple mission: providing a clean, aesthetic, and welcoming space for creators, thinkers, and coffee connoisseurs.
+              {settings?.homeCommunityDescription || "We brew artisanal coffee and curate fresh culinary snacks with one simple mission: providing a clean, aesthetic, and welcoming space for creators, thinkers, and coffee connoisseurs."}
             </p>
             <div className="flex items-center gap-6 text-xs font-semibold text-cafeDark/60 pt-2">
               <div className="flex items-center gap-1"><Coffee className="h-4 w-4 text-primary" /> Local Roasts</div>

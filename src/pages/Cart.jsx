@@ -1,6 +1,7 @@
 import React, { useContext, useState, useEffect } from 'react';
 import { useNavigate, Link } from 'react-router-dom';
 import { CartContext } from '../context/CartContext';
+import { SettingsContext } from '../context/SettingsContext';
 import api from '../utils/api';
 import { Trash2, Plus, Minus, ArrowRight, ShoppingBag, CreditCard, User, Phone, Tag, CheckCircle } from 'lucide-react';
 import { supabase } from '../utils/supabase';
@@ -19,6 +20,103 @@ export default function Cart() {
     cartTotal,
   } = useContext(CartContext);
 
+  const { settings } = useContext(SettingsContext);
+
+  const taxableAmount = Math.max(0, subTotal - discountAmount);
+  const taxAmount = taxableAmount * (settings.taxPercentage / 100);
+  const [deliveryMethod, setDeliveryMethod] = useState('TAKEAWAY'); // TAKEAWAY or DELIVERY
+  const [address, setAddress] = useState('');
+
+  const [coords, setCoords] = useState(null); // { latitude, longitude }
+  const [locLoading, setLocLoading] = useState(false);
+  const [locError, setLocError] = useState('');
+
+  // Haversine distance helper
+  const calculateDistance = (lat1, lon1, lat2, lon2) => {
+    const pLat1 = parseFloat(lat1);
+    const pLon1 = parseFloat(lon1);
+    const pLat2 = parseFloat(lat2);
+    const pLon2 = parseFloat(lon2);
+    const R = 6371; // km
+    const dLat = (pLat2 - pLat1) * Math.PI / 180;
+    const dLon = (pLon2 - pLon1) * Math.PI / 180;
+    const a =
+      Math.sin(dLat / 2) * Math.sin(dLat / 2) +
+      Math.cos(pLat1 * Math.PI / 180) * Math.cos(pLat2 * Math.PI / 180) *
+      Math.sin(dLon / 2) * Math.sin(dLon / 2);
+    const c = 2 * Math.atan2(Math.sqrt(a), Math.sqrt(1 - a));
+    return R * c;
+  };
+
+  const handleGetLocation = () => {
+    setLocLoading(true);
+    setLocError('');
+
+
+    if (!navigator.geolocation) {
+      setLocError('Geolocation is not supported by your browser.');
+      setLocLoading(false);
+      return;
+    }
+
+    navigator.geolocation.getCurrentPosition(
+      (position) => {
+        setCoords({
+          latitude: position.coords.latitude,
+          longitude: position.coords.longitude,
+        });
+        setLocLoading(false);
+      },
+      (error) => {
+        console.error(error);
+        let msg = 'Unable to retrieve location. ';
+        if (error.code === error.PERMISSION_DENIED) {
+          msg += 'Location permission denied.';
+        } else if (error.code === error.POSITION_UNAVAILABLE) {
+          msg += 'Location info unavailable.';
+        } else if (error.code === error.TIMEOUT) {
+          msg += 'Location retrieval timed out.';
+        } else {
+          msg += 'Please grant location permissions.';
+        }
+        setLocError(msg);
+        setLocLoading(false);
+      },
+      { enableHighAccuracy: true, timeout: 15000, maximumAge: 0 }
+    );
+  };
+
+
+  let distance = null;
+  let isWithinRange = true;
+  let calculatedCharges = 0;
+
+  if (deliveryMethod === 'DELIVERY' && coords && coords.latitude !== '' && coords.longitude !== '' && !isNaN(coords.latitude) && !isNaN(coords.longitude) && settings) {
+    const shopLat = parseFloat(settings.shopLatitude);
+    const shopLon = parseFloat(settings.shopLongitude);
+    const rangeLimit = parseFloat(settings.deliveryRangeKm) || 10.0;
+    const chargePerKm = parseFloat(settings.deliveryChargePerKm) || 10.0;
+
+    if (!isNaN(shopLat) && !isNaN(shopLon)) {
+      distance = calculateDistance(coords.latitude, coords.longitude, shopLat, shopLon);
+      if (!isNaN(distance)) {
+        if (distance <= rangeLimit) {
+          isWithinRange = true;
+          calculatedCharges = distance * chargePerKm;
+        } else {
+          isWithinRange = false;
+          calculatedCharges = 0;
+        }
+      }
+    } else {
+      isWithinRange = false;
+      calculatedCharges = 0;
+    }
+  }
+  
+  const deliveryCharges = deliveryMethod === 'DELIVERY' ? calculatedCharges : 0;
+  const finalTotalAmount = taxableAmount + taxAmount + deliveryCharges;
+
   const [name, setName] = useState('');
   const [phone, setPhone] = useState('');
   const [paymentMethod, setPaymentMethod] = useState('CASH');
@@ -33,12 +131,6 @@ export default function Cart() {
   useEffect(() => {
     if (!supabase) {
       setAuthLoading(false);
-      const savedMockUser = localStorage.getItem('mock_supabase_user');
-      if (savedMockUser) {
-        const u = JSON.parse(savedMockUser);
-        setUser({ email: u.email });
-        setName(u.name || '');
-      }
       return;
     }
 
@@ -64,31 +156,31 @@ export default function Cart() {
     return () => subscription.unsubscribe();
   }, []);
 
+  // Auto-request location access when Delivery Method is set to DELIVERY
+  useEffect(() => {
+    if (deliveryMethod === 'DELIVERY' && !coords && !locLoading) {
+      handleGetLocation();
+    }
+  }, [deliveryMethod]);
+
   const handleGoogleSignIn = async () => {
     if (!supabase) {
-      const mockUser = {
-        email: 'vipul.kumawat@example.com',
-        user_metadata: {
-          full_name: 'Vipul Kumawat',
-          name: 'Vipul Kumawat'
-        }
-      };
-      localStorage.setItem('mock_supabase_user', JSON.stringify({ name: mockUser.user_metadata.full_name, email: mockUser.email }));
-      setUser(mockUser);
-      setName(mockUser.user_metadata.full_name);
+      setError('Supabase is not configured. Google sign-in is unavailable.');
       return;
     }
 
     try {
+      setAuthLoading(true);
       const { error } = await supabase.auth.signInWithOAuth({
         provider: 'google',
         options: {
-          redirectTo: window.location.origin + '/cart'
-        }
+          redirectTo: window.location.origin + '/cart',
+        },
       });
       if (error) throw error;
     } catch (err) {
-      setError(err.message || 'Google Auth failed');
+      setError(err.message || 'Failed to initialize Google authentication');
+      setAuthLoading(false);
     }
   };
 
@@ -133,35 +225,68 @@ export default function Cart() {
       setError('Please enter your name');
       return;
     }
-    if (!phone.trim() || phone.length < 8) {
-      setError('Please enter a valid phone number');
+    if (!phone.trim() || phone.length !== 10) {
+      setError('Phone number must be exactly 10 digits');
       return;
+    }
+    if (deliveryMethod === 'DELIVERY') {
+      if (!coords) {
+        setError('Please share your live location to calculate delivery fee and verify range.');
+        return;
+      }
+      if (!isWithinRange) {
+        setError('Your location is outside our delivery range.');
+        return;
+      }
+      if (!address.trim()) {
+        setError('Please enter your delivery address');
+        return;
+      }
     }
 
     setPlacingOrder(true);
 
     try {
       // 1. Create or verify Customer first
-      const custRes = await api.post('/customers', { name, phone });
+      const custRes = await api.post('/customers', { name, phone, address: deliveryMethod === 'DELIVERY' ? address : undefined });
       if (!custRes.success) {
         throw new Error(custRes.message || 'Failed to register customer');
       }
 
       // 2. Prepare Order Payload
       const orderPayload = {
+        name,
         phone,
+        address: deliveryMethod === 'DELIVERY' ? address : undefined,
         items: cartItems.map((item) => ({
           productId: item.product.id,
+          focusId: item.product.id,
           quantity: item.quantity,
         })),
         paymentMethod,
+        deliveryMethod,
         couponCode: appliedCoupon ? appliedCoupon.code : undefined,
+        latitude: deliveryMethod === 'DELIVERY' && coords ? coords.latitude : undefined,
+        longitude: deliveryMethod === 'DELIVERY' && coords ? coords.longitude : undefined,
       };
 
       // 3. Post Order
       const orderRes = await api.post('/orders', orderPayload);
       if (orderRes.success) {
         clearCart();
+        localStorage.setItem('active_order_id', orderRes.order.id);
+        
+        // Save to order history list in localStorage
+        try {
+          const historyIds = JSON.parse(localStorage.getItem('1312_customer_order_ids') || '[]');
+          if (!historyIds.includes(orderRes.order.id)) {
+            historyIds.push(orderRes.order.id);
+            localStorage.setItem('1312_customer_order_ids', JSON.stringify(historyIds));
+          }
+        } catch (e) {
+          console.error('Error saving order history to localStorage:', e);
+        }
+
         navigate('/tracking', { state: { orderId: orderRes.order.id } });
       } else {
         throw new Error(orderRes.message || 'Failed to place order');
@@ -300,8 +425,8 @@ export default function Cart() {
                   Sign In with Google
                 </button>
                 {!supabase && (
-                  <span className="text-[9px] text-primary font-bold uppercase tracking-wider bg-primary/10 px-2 py-0.5 rounded-full">
-                    Demo/Local Mock Mode (Supabase keys not loaded)
+                  <span className="text-[10px] text-red-500 font-bold uppercase tracking-wider bg-red-50 border border-red-200 px-3 py-1 rounded-xl">
+                    ⚠️ Network Connection Error. Please try again later.
                   </span>
                 )}
               </div>
@@ -330,7 +455,50 @@ export default function Cart() {
                   </button>
                 </div>
 
-                <div className="grid grid-cols-1 gap-6">
+                {/* Delivery Option Toggle */}
+                <div className="space-y-2">
+                  <label className="text-xs font-bold text-cafeDark tracking-wide uppercase">Delivery Option</label>
+                  <div className="grid grid-cols-2 gap-3">
+                    <button
+                      type="button"
+                      onClick={() => setDeliveryMethod('TAKEAWAY')}
+                      className={`h-11 rounded-xl border text-xs font-bold transition-all ${
+                        deliveryMethod === 'TAKEAWAY'
+                          ? 'border-primary bg-primary/5 text-primary'
+                          : 'border-primary/10 text-cafeDark/60 hover:bg-cafeDark/5'
+                      }`}
+                    >
+                      Take Away
+                    </button>
+                    <button
+                      type="button"
+                      onClick={() => setDeliveryMethod('DELIVERY')}
+                      className={`h-11 rounded-xl border text-xs font-bold transition-all ${
+                        deliveryMethod === 'DELIVERY'
+                          ? 'border-primary bg-primary/5 text-primary'
+                          : 'border-primary/10 text-cafeDark/60 hover:bg-cafeDark/5'
+                      }`}
+                    >
+                      Home Delivery
+                    </button>
+                  </div>
+                </div>
+
+                <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
+                  <div className="space-y-2">
+                    <label className="text-xs font-bold text-cafeDark tracking-wide uppercase flex items-center gap-1.5">
+                      <User className="h-3.5 w-3.5 text-primary" /> Full Name
+                    </label>
+                    <input
+                      type="text"
+                      required
+                      placeholder="e.g. Alice Smith"
+                      value={name}
+                      onChange={(e) => setName(e.target.value)}
+                      className="w-full h-12 px-4 rounded-xl border border-primary/15 bg-[#F8F9F6] focus:border-primary focus:ring-1 focus:ring-primary outline-none transition-all text-sm text-cafeDark"
+                    />
+                  </div>
+
                   <div className="space-y-2">
                     <label className="text-xs font-bold text-cafeDark tracking-wide uppercase flex items-center gap-1.5">
                       <Phone className="h-3.5 w-3.5 text-primary" /> Phone Number
@@ -338,13 +506,82 @@ export default function Cart() {
                     <input
                       type="tel"
                       required
-                      placeholder="e.g. 9876543210"
+                      maxLength={10}
+                      placeholder="e.g. 9876543210 (10 digits)"
                       value={phone}
-                      onChange={(e) => setPhone(e.target.value)}
+                      onChange={(e) => setPhone(e.target.value.replace(/\D/g, '').slice(0, 10))}
                       className="w-full h-12 px-4 rounded-xl border border-primary/15 bg-[#F8F9F6] focus:border-primary focus:ring-1 focus:ring-primary outline-none transition-all text-sm text-cafeDark"
                     />
                   </div>
                 </div>
+
+                {deliveryMethod === 'DELIVERY' && (
+                  <div className="space-y-4 animate-fade-in border-t border-primary/5 pt-4">
+                    {/* Location Permission Notification Banner */}
+                    {!coords && (
+                      <div className="p-4 bg-primary/10 border border-primary/20 text-cafeDark rounded-2xl flex items-center gap-3 text-xs animate-pulse">
+                        <span className="text-base">📍</span>
+                        <div>
+                          <p className="font-bold">Location Permission Prompted</p>
+                          <p className="text-[10px] text-cafeDark/70">Please click "Allow" on the system popup prompt to verify delivery range.</p>
+                        </div>
+                      </div>
+                    )}
+                    {/* Geolocation Section */}
+                    <div className="bg-[#F8F9F6] border border-primary/10 rounded-2xl p-4 space-y-3">
+                      <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3">
+                        <div>
+                          <label className="text-xs font-bold text-cafeDark uppercase">Delivery Location Coordinates</label>
+                          <p className="text-[10px] text-cafeDark/50 mt-0.5">Share live location or adjust coordinates manually if browser location is inaccurate.</p>
+                        </div>
+                        <button
+                          type="button"
+                          onClick={handleGetLocation}
+                          disabled={locLoading}
+                          className="px-4 py-2 bg-primary text-cafeDark text-xs font-bold rounded-xl hover:bg-cafeDark hover:text-primary transition-all duration-300 shadow-md shrink-0 disabled:opacity-50"
+                        >
+                          {locLoading ? 'Locating...' : '📍 Share Live Location'}
+                        </button>
+                      </div>
+
+
+                      {/* Geolocation Status / Output */}
+                      {locError && (
+                        <p className="text-xs text-red-500 font-semibold">{locError}</p>
+                      )}
+                      
+                      {coords && coords.latitude !== '' && coords.longitude !== '' && distance !== null && !isNaN(distance) && (
+                        <div className="text-[11px] font-semibold text-cafeDark/80 space-y-1 bg-white p-3 rounded-xl border border-primary/5 animate-fade-in">
+                          <div className="flex justify-between">
+                            <span>Distance to Cafe:</span>
+                            <span className={isWithinRange ? "text-green-600 font-bold" : "text-red-500 font-bold"}>
+                              {distance.toFixed(2)} km {isWithinRange ? "(Within Range)" : "(Out of Range)"}
+                            </span>
+                          </div>
+                          {!isWithinRange && (
+                            <div className="p-2 bg-red-50 border border-red-100 rounded-lg text-[10px] text-red-600 mt-2 font-medium">
+                              ⚠️ Distance exceeds our maximum delivery range of {settings.deliveryRangeKm} km. Please select TAKE AWAY or enter closer coordinates.
+                            </div>
+                          )}
+                        </div>
+                      )}
+                    </div>
+
+                    <div className="space-y-2">
+                      <label className="text-xs font-bold text-cafeDark tracking-wide uppercase flex items-center gap-1.5">
+                        Delivery Address
+                      </label>
+                      <textarea
+                        required
+                        rows="3"
+                        placeholder="Enter your complete home or office address..."
+                        value={address}
+                        onChange={(e) => setAddress(e.target.value)}
+                        className="w-full p-4 rounded-xl border border-primary/15 bg-[#F8F9F6] focus:border-primary focus:ring-1 focus:ring-primary outline-none transition-all text-sm text-cafeDark resize-none"
+                      ></textarea>
+                    </div>
+                  </div>
+                )}
               </div>
             )}
           </div>
@@ -371,12 +608,30 @@ export default function Cart() {
                 </div>
               )}
               <div className="flex justify-between text-sm text-cafeDark/70">
-                <span>Taxes & Service</span>
-                <span className="italic text-xs text-cafeDark/40">Included</span>
+                <span>Taxes & Service ({settings.taxPercentage}%)</span>
+                <span>₹{taxAmount.toFixed(2)}</span>
+              </div>
+              <div className="flex justify-between text-sm text-cafeDark/70">
+                <span>Delivery Charges</span>
+                <span>
+                  {deliveryMethod === 'DELIVERY' ? (
+                    coords ? (
+                      isWithinRange ? (
+                        `₹${deliveryCharges.toFixed(2)} (${distance.toFixed(1)} km)`
+                      ) : (
+                        <span className="text-red-500 font-bold">Out of Range</span>
+                      )
+                    ) : (
+                      <span className="text-primary font-semibold animate-pulse">Share location...</span>
+                    )
+                  ) : (
+                    `₹0.00`
+                  )}
+                </span>
               </div>
               <div className="border-t border-primary/5 pt-3 flex justify-between text-base font-bold text-cafeDark">
                 <span>Total Amount</span>
-                <span>₹{cartTotal.toFixed(2)}</span>
+                <span>₹{finalTotalAmount.toFixed(2)}</span>
               </div>
             </div>
 
@@ -437,8 +692,8 @@ export default function Cart() {
                       : 'border-primary/10 text-cafeDark/60 hover:bg-cafeDark/5'
                   }`}
                 >
-                  <span>CARD/UPI</span>
-                  <span className="text-[9px] font-normal opacity-70">Swipe/Scan</span>
+                  <span>UPI</span>
+                  <span className="text-[9px] font-normal opacity-70">Scan QR Code</span>
                 </button>
               </div>
             </div>
@@ -461,10 +716,10 @@ export default function Cart() {
             ) : (
               <button
                 onClick={handlePlaceOrder}
-                disabled={placingOrder}
+                disabled={placingOrder || (deliveryMethod === 'DELIVERY' && (!coords || !isWithinRange))}
                 className="w-full h-12 bg-primary text-cafeDark font-bold rounded-2xl hover:bg-cafeDark hover:text-background disabled:opacity-50 disabled:cursor-not-allowed transition-all flex items-center justify-center shadow-lg shadow-primary/10"
               >
-                {placingOrder ? 'Processing...' : `Place Order • ₹${cartTotal.toFixed(2)}`}
+                {placingOrder ? 'Processing...' : (deliveryMethod === 'DELIVERY' && !coords) ? 'Share Location to Order' : `Place Order • ₹${finalTotalAmount.toFixed(2)}`}
               </button>
             )}
           </div>
