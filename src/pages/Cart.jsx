@@ -30,6 +30,10 @@ export default function Cart() {
   const [coords, setCoords] = useState(null); // { latitude, longitude }
   const [locLoading, setLocLoading] = useState(false);
   const [locError, setLocError] = useState('');
+  const [distance, setDistance] = useState(null);
+  const [isWithinRange, setIsWithinRange] = useState(true);
+  const [calculatedCharges, setCalculatedCharges] = useState(0);
+  const [distLoading, setDistLoading] = useState(false);
 
   // Haversine distance helper
   const calculateDistance = (lat1, lon1, lat2, lon2) => {
@@ -87,33 +91,6 @@ export default function Cart() {
   };
 
 
-  let distance = null;
-  let isWithinRange = true;
-  let calculatedCharges = 0;
-
-  if (deliveryMethod === 'DELIVERY' && coords && coords.latitude !== '' && coords.longitude !== '' && !isNaN(coords.latitude) && !isNaN(coords.longitude) && settings) {
-    const shopLat = parseFloat(settings.shopLatitude);
-    const shopLon = parseFloat(settings.shopLongitude);
-    const rangeLimit = parseFloat(settings.deliveryRangeKm) || 10.0;
-    const chargePerKm = parseFloat(settings.deliveryChargePerKm) || 10.0;
-
-    if (!isNaN(shopLat) && !isNaN(shopLon)) {
-      distance = calculateDistance(coords.latitude, coords.longitude, shopLat, shopLon);
-      if (!isNaN(distance)) {
-        if (distance <= rangeLimit) {
-          isWithinRange = true;
-          calculatedCharges = distance * chargePerKm;
-        } else {
-          isWithinRange = false;
-          calculatedCharges = 0;
-        }
-      }
-    } else {
-      isWithinRange = false;
-      calculatedCharges = 0;
-    }
-  }
-  
   const deliveryCharges = deliveryMethod === 'DELIVERY' ? calculatedCharges : 0;
   const finalTotalAmount = taxableAmount + taxAmount + deliveryCharges;
 
@@ -162,6 +139,88 @@ export default function Cart() {
       handleGetLocation();
     }
   }, [deliveryMethod]);
+
+  // Fetch road distance via OSRM, fallback to Haversine
+  useEffect(() => {
+    let active = true;
+
+    async function updateDistance() {
+      if (deliveryMethod !== 'DELIVERY' || !coords || coords.latitude === '' || coords.longitude === '' || isNaN(coords.latitude) || isNaN(coords.longitude) || !settings) {
+        if (active) {
+          setDistance(null);
+          setIsWithinRange(true);
+          setCalculatedCharges(0);
+        }
+        return;
+      }
+
+      const shopLat = parseFloat(settings.shopLatitude);
+      const shopLon = parseFloat(settings.shopLongitude);
+      const rangeLimit = parseFloat(settings.deliveryRangeKm) || 10.0;
+      const chargePerKm = parseFloat(settings.deliveryChargePerKm) || 10.0;
+
+      if (isNaN(shopLat) || isNaN(shopLon)) {
+        if (active) {
+          setIsWithinRange(false);
+          setCalculatedCharges(0);
+        }
+        return;
+      }
+
+      if (active) setDistLoading(true);
+
+      // 1. Calculate Haversine distance first (fallback)
+      const haversineDist = calculateDistance(coords.latitude, coords.longitude, shopLat, shopLon);
+      let finalDist = haversineDist;
+
+      // 2. Try fetching road distance from OSRM
+      try {
+        const osrmUrl = `https://router.project-osrm.org/route/v1/driving/${coords.longitude},${coords.latitude};${shopLon},${shopLat}?overview=false`;
+        
+        const controller = new AbortController();
+        const timeoutId = setTimeout(() => controller.abort(), 4000); // 4 second timeout
+        
+        const res = await fetch(osrmUrl, { signal: controller.signal });
+        clearTimeout(timeoutId);
+        
+        if (res.ok) {
+          const data = await res.json();
+          if (data.code === 'Ok' && data.routes && data.routes[0]) {
+            const osrmDist = data.routes[0].distance / 1000; // in km
+            if (!isNaN(osrmDist)) {
+              finalDist = osrmDist;
+            }
+          }
+        }
+      } catch (err) {
+        console.warn('OSRM route failed, using Haversine distance:', err);
+      }
+
+      if (!active) return;
+
+      if (!isNaN(finalDist)) {
+        setDistance(finalDist);
+        if (finalDist <= rangeLimit) {
+          setIsWithinRange(true);
+          setCalculatedCharges(finalDist * chargePerKm);
+        } else {
+          setIsWithinRange(false);
+          setCalculatedCharges(0);
+        }
+      } else {
+        setDistance(null);
+        setIsWithinRange(false);
+        setCalculatedCharges(0);
+      }
+      setDistLoading(false);
+    }
+
+    updateDistance();
+
+    return () => {
+      active = false;
+    };
+  }, [coords, deliveryMethod, settings]);
 
   const handleGoogleSignIn = async () => {
     if (!supabase) {
@@ -550,18 +609,29 @@ export default function Cart() {
                         <p className="text-xs text-red-500 font-semibold">{locError}</p>
                       )}
                       
-                      {coords && coords.latitude !== '' && coords.longitude !== '' && distance !== null && !isNaN(distance) && (
+                      {coords && coords.latitude !== '' && coords.longitude !== '' && (
                         <div className="text-[11px] font-semibold text-cafeDark/80 space-y-1 bg-white p-3 rounded-xl border border-primary/5 animate-fade-in">
-                          <div className="flex justify-between">
-                            <span>Distance to Cafe:</span>
-                            <span className={isWithinRange ? "text-green-600 font-bold" : "text-red-500 font-bold"}>
-                              {distance.toFixed(2)} km {isWithinRange ? "(Within Range)" : "(Out of Range)"}
-                            </span>
-                          </div>
-                          {!isWithinRange && (
-                            <div className="p-2 bg-red-50 border border-red-100 rounded-lg text-[10px] text-red-600 mt-2 font-medium">
-                              ⚠️ Distance exceeds our maximum delivery range of {settings.deliveryRangeKm} km. Please select TAKE AWAY or enter closer coordinates.
+                          {distLoading ? (
+                            <div className="flex justify-between items-center text-cafeDark/50">
+                              <span>Calculating road distance...</span>
+                              <div className="h-3.5 w-3.5 border-2 border-primary border-t-transparent rounded-full animate-spin shrink-0"></div>
                             </div>
+                          ) : distance !== null && !isNaN(distance) ? (
+                            <>
+                              <div className="flex justify-between">
+                                <span>Distance to Cafe (via roads):</span>
+                                <span className={isWithinRange ? "text-green-600 font-bold" : "text-red-500 font-bold"}>
+                                  {distance.toFixed(2)} km {isWithinRange ? "(Within Range)" : "(Out of Range)"}
+                                </span>
+                              </div>
+                              {!isWithinRange && (
+                                <div className="p-2 bg-red-50 border border-red-100 rounded-lg text-[10px] text-red-600 mt-2 font-medium">
+                                  ⚠️ Distance exceeds our maximum delivery range of {settings.deliveryRangeKm} km. Please select TAKE AWAY or enter closer coordinates.
+                                </div>
+                              )}
+                            </>
+                          ) : (
+                            <span className="text-red-500 font-semibold">Error calculating road distance.</span>
                           )}
                         </div>
                       )}
@@ -617,7 +687,11 @@ export default function Cart() {
                   {deliveryMethod === 'DELIVERY' ? (
                     coords ? (
                       isWithinRange ? (
-                        `₹${deliveryCharges.toFixed(2)} (${distance.toFixed(1)} km)`
+                        distance !== null ? (
+                          `₹${deliveryCharges.toFixed(2)} (${distance.toFixed(1)} km)`
+                        ) : (
+                          <span className="text-primary font-semibold animate-pulse">Calculating...</span>
+                        )
                       ) : (
                         <span className="text-red-500 font-bold">Out of Range</span>
                       )
@@ -685,9 +759,9 @@ export default function Cart() {
                 </button>
                 <button
                   type="button"
-                  onClick={() => setPaymentMethod('CARD')}
+                  onClick={() => setPaymentMethod('UPI')}
                   className={`h-12 rounded-xl border text-xs font-bold flex flex-col justify-center items-center transition-all ${
-                    paymentMethod === 'CARD'
+                    paymentMethod === 'UPI'
                       ? 'border-primary bg-primary/5 text-primary'
                       : 'border-primary/10 text-cafeDark/60 hover:bg-cafeDark/5'
                   }`}
@@ -706,13 +780,15 @@ export default function Cart() {
 
             {/* Place Order CTA */}
             {!user ? (
-              <button
-                type="button"
-                onClick={handleGoogleSignIn}
-                className="w-full h-12 bg-cafeDark text-background font-bold rounded-2xl hover:bg-primary hover:text-cafeDark transition-all flex items-center justify-center shadow-lg"
-              >
-                Sign In with Google to Checkout
-              </button>
+              <div className="flex flex-col gap-2.5 w-full">
+                <button
+                  type="button"
+                  onClick={handleGoogleSignIn}
+                  className="w-full h-12 bg-cafeDark text-background font-bold rounded-2xl hover:bg-primary hover:text-cafeDark transition-all flex items-center justify-center shadow-lg"
+                >
+                  Sign In with Google
+                </button>
+              </div>
             ) : (
               <button
                 onClick={handlePlaceOrder}
