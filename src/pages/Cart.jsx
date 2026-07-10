@@ -90,6 +90,83 @@ export default function Cart() {
     );
   };
 
+  // Initialize and update Leaflet map for customer delivery location
+  useEffect(() => {
+    if (deliveryMethod !== 'DELIVERY' || !coords || coords.latitude === '' || coords.longitude === '' || isNaN(coords.latitude) || isNaN(coords.longitude) || !settings) {
+      return;
+    }
+
+    const mapId = 'map-delivery';
+    const container = document.getElementById(mapId);
+    if (!container) return;
+
+    const shopLat = parseFloat(settings.shopLatitude) || 19.5786;
+    const shopLon = parseFloat(settings.shopLongitude) || 72.8223;
+    const customerLat = parseFloat(coords.latitude);
+    const customerLon = parseFloat(coords.longitude);
+
+    if (container._leaflet_id) {
+      if (window.deliveryMap && window.deliveryMarker) {
+        const newLatLng = [customerLat, customerLon];
+        window.deliveryMarker.setLatLng(newLatLng);
+        window.deliveryMap.setView(newLatLng, window.deliveryMap.getZoom());
+      }
+      return;
+    }
+
+    const map = L.map(mapId).setView([customerLat, customerLon], 14);
+    window.deliveryMap = map;
+
+    L.tileLayer('https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png', {
+      maxZoom: 19,
+      attribution: '© OpenStreetMap contributors'
+    }).addTo(map);
+
+    const shopIcon = L.icon({
+      iconUrl: 'https://raw.githubusercontent.com/pointhi/leaflet-color-markers/master/img/marker-icon-2x-green.png',
+      shadowUrl: 'https://cdnjs.cloudflare.com/ajax/libs/leaflet/0.7.7/images/marker-shadow.png',
+      iconSize: [25, 41],
+      iconAnchor: [12, 41],
+      popupAnchor: [1, -34],
+      shadowSize: [41, 41]
+    });
+
+    const customerIcon = L.icon({
+      iconUrl: 'https://raw.githubusercontent.com/pointhi/leaflet-color-markers/master/img/marker-icon-2x-red.png',
+      shadowUrl: 'https://cdnjs.cloudflare.com/ajax/libs/leaflet/0.7.7/images/marker-shadow.png',
+      iconSize: [25, 41],
+      iconAnchor: [12, 41],
+      popupAnchor: [1, -34],
+      shadowSize: [41, 41]
+    });
+
+    L.marker([shopLat, shopLon], { icon: shopIcon }).addTo(map).bindPopup('1312 Cafe (Shop)').openPopup();
+
+    const marker = L.marker([customerLat, customerLon], { 
+      icon: customerIcon,
+      draggable: true 
+    }).addTo(map).bindPopup('Your Delivery Location (Drag to change)').openPopup();
+    
+    window.deliveryMarker = marker;
+
+    marker.on('dragend', () => {
+      const latLng = marker.getLatLng();
+      setCoords({
+        latitude: parseFloat(latLng.lat.toFixed(6)),
+        longitude: parseFloat(latLng.lng.toFixed(6))
+      });
+    });
+
+    map.on('click', (e) => {
+      const latLng = e.latlng;
+      marker.setLatLng(latLng);
+      setCoords({
+        latitude: parseFloat(latLng.lat.toFixed(6)),
+        longitude: parseFloat(latLng.lng.toFixed(6))
+      });
+    });
+  }, [coords, deliveryMethod, settings]);
+
 
   const deliveryCharges = deliveryMethod === 'DELIVERY' ? calculatedCharges : 0;
   const finalTotalAmount = taxableAmount + taxAmount + deliveryCharges;
@@ -173,27 +250,18 @@ export default function Cart() {
       const haversineDist = calculateDistance(coords.latitude, coords.longitude, shopLat, shopLon);
       let finalDist = haversineDist;
 
-      // 2. Try fetching road distance from OSRM
+      // 2. Try fetching road distance from secure Backend (which uses Google Maps with OSRM fallback)
       try {
-        const osrmUrl = `https://router.project-osrm.org/route/v1/driving/${coords.longitude},${coords.latitude};${shopLon},${shopLat}?overview=false`;
+        const res = await api.post('/settings/distance', {
+          latitude: coords.latitude,
+          longitude: coords.longitude
+        });
         
-        const controller = new AbortController();
-        const timeoutId = setTimeout(() => controller.abort(), 4000); // 4 second timeout
-        
-        const res = await fetch(osrmUrl, { signal: controller.signal });
-        clearTimeout(timeoutId);
-        
-        if (res.ok) {
-          const data = await res.json();
-          if (data.code === 'Ok' && data.routes && data.routes[0]) {
-            const osrmDist = data.routes[0].distance / 1000; // in km
-            if (!isNaN(osrmDist)) {
-              finalDist = osrmDist;
-            }
-          }
+        if (res && res.success && res.distance !== null && !isNaN(res.distance)) {
+          finalDist = res.distance;
         }
       } catch (err) {
-        console.warn('OSRM route failed, using Haversine distance:', err);
+        console.warn('Backend secure distance lookup failed, using Haversine distance:', err);
       }
 
       if (!active) return;
@@ -610,29 +678,34 @@ export default function Cart() {
                       )}
                       
                       {coords && coords.latitude !== '' && coords.longitude !== '' && (
-                        <div className="text-[11px] font-semibold text-cafeDark/80 space-y-1 bg-white p-3 rounded-xl border border-primary/5 animate-fade-in">
-                          {distLoading ? (
-                            <div className="flex justify-between items-center text-cafeDark/50">
-                              <span>Calculating road distance...</span>
-                              <div className="h-3.5 w-3.5 border-2 border-primary border-t-transparent rounded-full animate-spin shrink-0"></div>
-                            </div>
-                          ) : distance !== null && !isNaN(distance) ? (
-                            <>
-                              <div className="flex justify-between">
-                                <span>Distance to Cafe (via roads):</span>
-                                <span className={isWithinRange ? "text-green-600 font-bold" : "text-red-500 font-bold"}>
-                                  {distance.toFixed(2)} km {isWithinRange ? "(Within Range)" : "(Out of Range)"}
-                                </span>
+                        <div className="space-y-3">
+                          {/* Map Container */}
+                          <div className="w-full h-48 rounded-xl border border-primary/10 overflow-hidden relative z-10" id="map-delivery"></div>
+
+                          <div className="text-[11px] font-semibold text-cafeDark/80 space-y-1 bg-white p-3 rounded-xl border border-primary/5 animate-fade-in">
+                            {distLoading ? (
+                              <div className="flex justify-between items-center text-cafeDark/50">
+                                <span>Calculating distance...</span>
+                                <div className="h-3.5 w-3.5 border-2 border-primary border-t-transparent rounded-full animate-spin shrink-0"></div>
                               </div>
-                              {!isWithinRange && (
-                                <div className="p-2 bg-red-50 border border-red-100 rounded-lg text-[10px] text-red-600 mt-2 font-medium">
-                                  ⚠️ Distance exceeds our maximum delivery range of {settings.deliveryRangeKm} km. Please select TAKE AWAY or enter closer coordinates.
+                            ) : distance !== null && !isNaN(distance) ? (
+                              <>
+                                <div className="flex justify-between">
+                                  <span>Distance to Cafe:</span>
+                                  <span className={isWithinRange ? "text-green-600 font-bold" : "text-red-500 font-bold"}>
+                                    {distance.toFixed(2)} km {isWithinRange ? "(Within Range)" : "(Out of Range)"}
+                                  </span>
                                 </div>
-                              )}
-                            </>
-                          ) : (
-                            <span className="text-red-500 font-semibold">Error calculating road distance.</span>
-                          )}
+                                {!isWithinRange && (
+                                  <div className="p-2 bg-red-50 border border-red-100 rounded-lg text-[10px] text-red-600 mt-2 font-medium">
+                                    ⚠️ Distance exceeds our maximum delivery range of {settings.deliveryRangeKm} km. Please select TAKE AWAY or enter closer coordinates.
+                                  </div>
+                                )}
+                              </>
+                            ) : (
+                              <span className="text-red-500 font-semibold">Error calculating distance.</span>
+                            )}
+                          </div>
                         </div>
                       )}
                     </div>
